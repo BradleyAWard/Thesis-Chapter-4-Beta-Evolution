@@ -146,6 +146,7 @@ def modified_blackbody_optically_thin(nu, z, theta, m=1, cmb=True):
     :param cmb: Inclusion of CMB effects (Default = TRUE)
     :return: Optically thin MBB model
     """
+    # Uncouple parameters
     log_m, t, beta = theta
 
     # Include effects of the CMB
@@ -153,22 +154,219 @@ def modified_blackbody_optically_thin(nu, z, theta, m=1, cmb=True):
         t_z = cmb_heating(z, t, beta)
         t = t_z
 
+    # Retrieve dust mass, distance, blackbody and dust absorption coefficient
     mass = (10 ** log_m) * M_sun
     d = cosmo.luminosity_distance(z=z).to(u.m)/(1+z)
     bb = blackbody(nu, t)
-
     kappa = get_kappa(nu, beta)
 
+    # Normalization from dust mass, distance and dust absorption coefficient
     sigma_times_a = mass
     tau_times_a = sigma_times_a * kappa
     omega_divided_a = 1 / (d ** 2)
-
     omega = omega_divided_a
     modifier = tau_times_a
 
+    # Combine blackbody with normalization, modifiers and CMB
     mbb_rest = omega * m * modifier * bb
     if cmb:
         mbb_rest = mbb_rest * f_cmb(nu, t, z)
 
     mbb_obs = mbb_rest/(1+z)
     return mbb_obs.value
+
+# --------------------------------------------------
+
+def modified_blackbody_optically_thin_powerlaw(nu, z, theta, m=1, cmb=True):
+    """
+    Optically thin modified balckbody model with mid-IR power law
+    
+    :param nu: Rest frame frequency [Hz]
+    :param z: Redshift
+    :param theta: Fitting parameters
+    :param m: Lensing magnification (Default = 1)
+    :param cmb: Inclusion of CMB effects (Default = TRUE)
+    :return: Optically thin MBB model with mid-IR power law
+    """
+    # Uncouple parameters
+    log_m, t, beta, alpha = theta
+    theta_mbb = log_m, t, beta
+
+    # Retrieve MBB model, find cutoff frequency, combine MBB with power law
+    mbb = modified_blackbody_optically_thin(nu, z, theta_mbb, m, cmb)
+    nu_c = find_cutoff_frequency(nu, mbb, alpha)
+    mbb_nu_c = modified_blackbody_optically_thin(nu_c, z, theta_mbb, m, cmb)
+    mbb_pl = add_powerlaw(nu, mbb, nu_c, mbb_nu_c, alpha)
+    return mbb_pl
+
+# --------------------------------------------------
+# General Opacity Model (Continuum Area)
+# --------------------------------------------------
+
+def modified_blackbody_general_opacity_r(nu, z, theta, m=1, cmb=True):
+    """
+    General opacity modified blackbody model - continuum area
+    
+    :param nu: Rest frame frequency [Hz]
+    :param z: Redshift
+    :param theta: Fitting parameters
+    :param m: Lensing magnification (Default = 1)
+    :param cmb: Inclusion of CMB effects (Default = TRUE)
+    :return: General opacity MBB model (continuum area)
+    """
+    # Uncouple parameters
+    log_m, t, beta, r = theta
+
+    # Include effects of the CMB
+    if cmb:
+        t_z = cmb_heating(z, t, beta)
+        t = t_z
+
+    # Retrieve dust mass, distance, blackbody and dust absorption coefficient
+    mass = (10 ** log_m) * M_sun
+    d = cosmo.luminosity_distance(z=z).to(u.m)/(1+z)
+    bb = blackbody(nu, t)
+    kappa = get_kappa(nu, beta)
+
+    # Calculate the continuum area and solid angle
+    r = (r * u.kpc).to(u.m)
+    a = 4 * np.pi * (r ** 2)
+    omega = a / (d ** 2)
+
+    # Normalization from dust mass surface density and dust absorption coefficient
+    sigma = mass / a
+    tau = sigma * kappa
+    modifier = (1 - np.exp(-tau))
+
+    # Combine blackbody with normalization, modifiers and CMB
+    mbb_rest = omega * m * modifier * bb
+    if cmb:
+        mbb_rest = mbb_rest * f_cmb(nu, t, z)
+
+    mbb_obs = mbb_rest / (1 + z)
+    return mbb_obs.value
+
+# --------------------------------------------------
+
+def modified_blackbody_general_opacity_r_powerlaw(nu, z, theta, m=1, cmb=True):
+    """
+    General opacity modified blackbody model with mid-IR power law - continuum area
+    
+    :param nu: Rest frame frequency [Hz]
+    :param z: Redshift
+    :param theta: Fitting parameters
+    :param m: Lensing magnification (Default = 1)
+    :param cmb: Inclusion of CMB effects (Default = TRUE)
+    :return: General opacity MBB model with power law (continuum area)
+    """
+    # Uncouple parameters
+    log_m, t, beta, alpha, r = theta
+    theta_mbb = log_m, t, beta, r
+
+    # Retrieve MBB model, find cutoff frequency, combine MBB with power law
+    mbb = modified_blackbody_general_opacity_r(nu, z, theta_mbb, m, cmb)
+    nu_c = find_cutoff_frequency(nu, mbb, alpha)
+    mbb_nu_c = modified_blackbody_general_opacity_r(nu_c, z, theta_mbb, m, cmb)
+    mbb_pl = add_powerlaw(nu, mbb, nu_c, mbb_nu_c, alpha)
+    return mbb_pl
+
+# --------------------------------------------------
+# General Opacity Model (Optically thick wavelength)
+# --------------------------------------------------
+
+def modified_blackbody_general_opacity_lambda(nu, z, theta, m=1, cmb=True):
+    """
+    General opacity modified blackbody model - optically thick wavelength
+    
+    :param nu: Rest frame frequency [Hz]
+    :param z: Redshift
+    :param theta: Fitting parameters
+    :param m: Lensing magnification (Default = 1)
+    :param cmb: Inclusion of CMB effects (Default = TRUE)
+    :return: General opacity MBB model (optically thick wavelength)
+    """
+    # Uncouple parameters
+    log_m, t, beta, lambda_thick = theta
+
+    # Include effects of the CMB
+    if cmb:
+        t_z = cmb_heating(z, t, beta)
+        t = t_z
+
+    # Retrieve dust mass, distance, blackbody and dust absorption coefficient
+    mass = (10 ** log_m) * M_sun
+    d = cosmo.luminosity_distance(z=z).to(u.m)/(1+z)
+    bb = blackbody(nu, t)
+    kappa = get_kappa(nu, beta)
+
+    # Normalization from dust mass optical depth and dust absorption coefficient
+    tau = get_tau(nu, lambda_thick, beta)
+    a = (mass*kappa)/tau
+    omega = a / (d ** 2)
+    modifier = (1 - np.exp(-tau))
+
+    # Combine blackbody with normalization, modifiers and CMB
+    mbb_rest = omega * m * modifier * bb
+    if cmb:
+        mbb_rest = mbb_rest * f_cmb(nu, t, z)
+
+    mbb_obs = mbb_rest / (1 + z)
+    return mbb_obs.value
+
+# --------------------------------------------------
+
+def modified_blackbody_general_opacity_lambda_powerlaw(nu, z, theta, m=1, cmb=True):
+    """
+    General opacity modified blackbody model with mid-IR power law - optically thick wavelength
+    
+    :param nu: Rest frame frequency [Hz]
+    :param z: Redshift
+    :param theta: Fitting parameters
+    :param m: Lensing magnification (Default = 1)
+    :param cmb: Inclusion of CMB effects (Default = TRUE)
+    :return: General opacity MBB model with power law (optically thick wavelength)
+    """
+    # Uncouple parameters
+    log_m, t, beta, alpha, lambda_thick = theta
+    theta_mbb = log_m, t, beta, lambda_thick
+
+    # Retrieve MBB model, find cutoff frequency, combine MBB with power law
+    mbb = modified_blackbody_general_opacity_lambda(nu, z, theta_mbb, m, cmb)
+    nu_c = find_cutoff_frequency(nu, mbb, alpha)
+    mbb_nu_c = modified_blackbody_general_opacity_lambda(nu_c, z, theta_mbb, m, cmb)
+    mbb_pl = add_powerlaw(nu, mbb, nu_c, mbb_nu_c, alpha)
+    return mbb_pl
+
+# --------------------------------------------------
+# Helper function for getting right model
+# --------------------------------------------------
+
+def get_model(nu, z, theta, m, opacity_model, powerlaw=True, cmb=True):
+    """
+    Returns the right MBB model depending on user inputs
+    
+    :param nu: Rest frame frequency [Hz]
+    :param z: Redshift
+    :param theta: Fitting parameters
+    :param m: Lensing magnification
+    :param opacity_model: Type of dust opacity model - "thin", "continuum_area" or "fixed_wave"
+    :param powerlaw: Adds a power law function to the model (Default = TRUE)
+    :param cmb: Inclusion of CMB effects (Default = TRUE)
+    :return: MBB model as directed by user
+    """
+    if opacity_model == 'thin':
+        if powerlaw:
+            model = modified_blackbody_optically_thin_powerlaw(nu, z, theta, m, cmb)
+        else:
+            model = modified_blackbody_optically_thin(nu, z, theta, m, cmb)
+    elif opacity_model == 'continuum_area':
+        if powerlaw:
+            model = modified_blackbody_general_opacity_r_powerlaw(nu, z, theta, m, cmb)
+        else:
+            model = modified_blackbody_general_opacity_r(nu, z, theta, m, cmb)
+    elif opacity_model == 'fixed_wave':
+        if powerlaw:
+            model = modified_blackbody_general_opacity_lambda_powerlaw(nu, z, theta, m, cmb)
+        else:
+            model = modified_blackbody_general_opacity_lambda(nu, z, theta, m, cmb)
+    return model
