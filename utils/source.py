@@ -29,7 +29,9 @@ class Data:
 # --------------------------------------------------
 
 class Source:
-
+    """
+    A class that defines an individual source
+    """
     def __init__(self, name: str, wavelength_obs_um: list, redshift: float, flux_jy: list, fluxerr_jy: list, magnification: float, calibration_percent: list):
         self.name = name
         self.redshift = redshift
@@ -119,30 +121,49 @@ class Source:
         self.frequencies_rest = c.value / self.wavelength_rest_m
         self.luminosity_distance = cosmo.luminosity_distance(z=self.redshift).to(u.m)
 
+        # Run the SED fitting routine if TRUE
         if fit_SED:
             self.sampler, self.varyparams = utils.mcmc(self.frequencies_rest, self.redshift, self.flux_jy, self.fluxerr_jy, self.magnification, self.opacity_model, self.fixparams, self.fixvalues, self.gaussian_prior, self.gaussian_prior_values, self.powerlaw, self.cmb, nwalkers=nwalkers, niters=niters, sigma=sigma, progress=progress)
 
     # Function returns the SED
     def sed(self, frequencies_rest, theta):
+        """
+        Returns the source SED
+
+        :param frequencies_rest: Rest frame frequencies [Hz]
+        :param theta: Fitting parameters
+        :return: Source SED
+        """
         y_model = utils.get_model(frequencies_rest, self.redshift, theta, m=self.magnification, opacity_model=self.opacity_model, powerlaw=self.powerlaw, cmb=self.cmb)
         return y_model
 
     # Returns the IR luminosity for a given set of theta
     def ir_luminosity(self, theta, lam_low_um_rest=8, lam_high_um_rest=1000):
-
+        """
+        Calculates the IR luminosity of the source
+        
+        :param theta: Fitting parameters
+        :param lam_low_um_rest: Low wavelength for IR integration (Default = 8) [microns]
+        :param lam_high_um_rest: High wavelength for IR integration (Default = 1000) [microns]
+        :return: IR luminosity [Lsun]
+        """
+        # Define a set of frequencies to integrate over
         lam_low_um_rest, lam_high_um_rest = lam_low_um_rest*u.micron, lam_high_um_rest*u.micron
         wave_range_rest_um = np.linspace(1, 5000, 100000) * u.micron
         wave_range_rest_m = wave_range_rest_um.to(u.m)
         freq_range_rest = c / wave_range_rest_m
         idx = np.where((wave_range_rest_um >= lam_low_um_rest) & (wave_range_rest_um <= lam_high_um_rest))
 
+        # Calculate the frequency gradient along the SED
         diff_freq = np.diff(freq_range_rest)
         diff_freq = np.append(diff_freq, diff_freq[-1])
 
+        # Integrate the SED
         sed_obs_integral = self.sed(freq_range_rest[idx].value, theta) * u.Jy
         sed_rest_integral = sed_obs_integral/(1+self.redshift)
         integral = np.sum(-sed_rest_integral*diff_freq[idx])
 
+        # Convert the integral to solar luminosity
         d_L = cosmo.luminosity_distance(z=self.redshift).to(u.m)
         l_watt = (4 * np.pi * (d_L ** 2) * integral).to(u.Watt)
         l_sun = l_watt / L_sun
@@ -151,18 +172,32 @@ class Source:
 
     # Returns the peak wavelength for a given set of theta
     def peak_wavelength(self, theta):
+        """
+        Calculates the peak wavelength of the source SED
+        
+        :param theta: Fitting parameters
+        :return: Peak wavelength [microns]
+        """
+        # Define range of rest frame frequencies from observed wavelength
         wave_range_obs_um = np.linspace(5, 10000, 5000)
         wave_range_obs_m = wave_range_obs_um*1e-6
         wave_range_rest_um = wave_range_obs_um/(1+self.redshift)
         wave_range_rest_m = wave_range_obs_m/(1+self.redshift)
         frequency_range_rest = c.value/wave_range_rest_m
+
+        # Retrieve the SED and find the maximum
         sed = self.sed(frequency_range_rest, theta)
         peak_index = np.argmax(sed)
         return wave_range_rest_um[peak_index]
 
     # Obtain sampler and add fixed and derived values
     def get_full_sampler(self):
-
+        """
+        Obtains the full sampler of MCMC run
+        
+        :return: Sampler for fitting parameters and full sampler
+        """
+        # Define a set of parameter names from chosen opacity model
         if self.opacity_model == "thin":
             if self.powerlaw:
                 params = ["log_m", "t", "beta", "alpha"]
@@ -181,22 +216,24 @@ class Source:
         self.params = params
         self.params_full = self.params.copy()
 
+        # Set up fixed and variable fitting parameter arrays
         flat_samples = self.sampler.get_chain(discard=self.burn_in, flat=True)
         n = len(flat_samples)
         sample_theta = np.zeros((n, len(self.params)))
         vary_param_idx = [self.params.index(self.varyparams[param_idx]) for param_idx in range(len(self.varyparams))]
         fix_param_idx = [self.params.index(self.fixparams[param_idx]) for param_idx in range(len(self.fixparams))]
+
+        # Populate the arrays with appropriate parameter lists
         sample_theta[:, vary_param_idx] = flat_samples
         sample_theta[:, fix_param_idx] = self.fixvalues
         sample_theta_vary = sample_theta[:, vary_param_idx]
         params_vary = [self.params[idx] for idx in vary_param_idx]
-
         sample_full = sample_theta
         sample_full_vary = sample_theta_vary
         self.params_theta_vary = params_vary
         self.params_full_vary = self.params_theta_vary.copy()
 
-        # Radius or peak wavelength, depending on which model was used
+        # Calculate optically thick wavelength from radius of continuum area
         if self.opacity_model == 'continuum_area':
             lambda_thick = []
             for it in range(len(sample_theta)):
@@ -214,6 +251,7 @@ class Source:
             self.params_full.append("lambda_thick")
             self.params_full_vary.append("lambda_thick")
 
+        # Calculate the radius of continuum area from optically thick wavelength
         elif self.opacity_model == 'fixed_wave':
             r = []
             for it in range(len(sample_theta)):
@@ -230,69 +268,68 @@ class Source:
             self.params_full.append("r")
             self.params_full_vary.append("r")
 
+        # If verbose outputs, include more derived parameters
         if self.verbose:
 
-            # Add log(mu M)
+            # Set up empty arrays for derived parameters
             log_mu_m = []
+            log_lir, log_mu_lir = [], []
+            log_lfir, log_mu_lfir = [], []
+            peak_wave = []
+
             for it in range(len(sample_theta)):
+                # Calculate log(mu M)
                 log_m_val = sample_full[it, self.params_full.index('log_m')]
                 log_mu_m_val = np.log10((10**log_m_val)*self.magnification)
                 log_mu_m.append(log_mu_m_val)
-            sample_full = np.hstack((sample_full, np.zeros((n, 1))))
-            sample_full_vary = np.hstack((sample_full_vary, np.zeros((n, 1))))
-            sample_full[:, -1] = log_mu_m
-            sample_full_vary[:, -1] = log_mu_m
+
+                # Calculate log(LIR) and log(mu LIR)
+                log_mu_lir_val = self.ir_luminosity(sample_theta[it], lam_low_um_rest=8, lam_high_um_rest=1000)
+                log_lir_val = np.log10((10**log_mu_lir_val)/self.magnification)
+                log_mu_lir.append(log_mu_lir_val)
+                log_lir.append(log_lir_val)
+
+                # Calculate log(LFIR) and log(mu LFIR)
+                log_mu_lfir_val = self.ir_luminosity(sample_theta[it], lam_low_um_rest=40, lam_high_um_rest=1000)
+                log_lfir_val = np.log10((10 ** log_mu_lfir_val) / self.magnification)
+                log_mu_lfir.append(log_mu_lfir_val)
+                log_lfir.append(log_lfir_val)
+
+                # Calculate peak wavelength
+                peak_wave_val = self.peak_wavelength(sample_theta[it])
+                peak_wave.append(peak_wave_val)
+
+            # Append log(mu M)
+            sample_full, sample_full_vary = np.hstack((sample_full, np.zeros((n, 1)))), np.hstack((sample_full_vary, np.zeros((n, 1))))
+            sample_full[:, -1], sample_full_vary[:, -1] = log_mu_m, log_mu_m
             self.params_full.append("log_mu_m")
             self.params_full_vary.append("log_mu_m")
 
-            # Add log(LIR) and log(mu LIR)
-            log_mu_lir = []
-            log_mu_lfir = []
-            log_lir = []
-            log_lfir = []
-            for it in range(len(sample_theta)):
-                log_mu_lir_val = self.ir_luminosity(sample_theta[it], lam_low_um_rest=8, lam_high_um_rest=1000)
-                log_mu_lfir_val = self.ir_luminosity(sample_theta[it], lam_low_um_rest=40, lam_high_um_rest=1000)
-                log_lir_val = np.log10((10**log_mu_lir_val)/self.magnification)
-                log_lfir_val = np.log10((10 ** log_mu_lfir_val) / self.magnification)
-                log_mu_lir.append(log_mu_lir_val)
-                log_mu_lfir.append(log_mu_lfir_val)
-                log_lir.append(log_lir_val)
-                log_lfir.append(log_lfir_val)
-            sample_full = np.hstack((sample_full, np.zeros((n, 1))))
-            sample_full_vary = np.hstack((sample_full_vary, np.zeros((n, 1))))
-            sample_full[:, -1] = log_mu_lir
-            sample_full_vary[:, -1] = log_mu_lir
-            self.params_full.append("log_mu_LIR")
-            self.params_full_vary.append("log_mu_LIR")
-            sample_full = np.hstack((sample_full, np.zeros((n, 1))))
-            sample_full_vary = np.hstack((sample_full_vary, np.zeros((n, 1))))
-            sample_full[:, -1] = log_mu_lfir
-            sample_full_vary[:, -1] = log_mu_lfir
-            self.params_full.append("log_mu_LFIR")
-            self.params_full_vary.append("log_mu_LFIR")
-            sample_full = np.hstack((sample_full, np.zeros((n, 1))))
-            sample_full_vary = np.hstack((sample_full_vary, np.zeros((n, 1))))
-            sample_full[:, -1] = log_lir
-            sample_full_vary[:, -1] = log_lir
+            # Append log(LIR) and log(mu LIR)    
+            sample_full, sample_full_vary = np.hstack((sample_full, np.zeros((n, 1)))), np.hstack((sample_full_vary, np.zeros((n, 1))))
+            sample_full[:, -1], sample_full_vary[:, -1] = log_lir, log_lir
             self.params_full.append("log_LIR")
             self.params_full_vary.append("log_LIR")
-            sample_full = np.hstack((sample_full, np.zeros((n, 1))))
-            sample_full_vary = np.hstack((sample_full_vary, np.zeros((n, 1))))
-            sample_full[:, -1] = log_lfir
-            sample_full_vary[:, -1] = log_lfir
+
+            sample_full, sample_full_vary = np.hstack((sample_full, np.zeros((n, 1)))), np.hstack((sample_full_vary, np.zeros((n, 1))))
+            sample_full[:, -1], sample_full_vary[:, -1] = log_mu_lir, log_mu_lir
+            self.params_full.append("log_mu_LIR")
+            self.params_full_vary.append("log_mu_LIR")
+
+            # Append log(LFIR) and log(mu LFIR)
+            sample_full, sample_full_vary = np.hstack((sample_full, np.zeros((n, 1)))), np.hstack((sample_full_vary, np.zeros((n, 1))))
+            sample_full[:, -1], sample_full_vary[:, -1] = log_lfir, log_lfir
             self.params_full.append("log_LFIR")
             self.params_full_vary.append("log_LFIR")
 
-            # Add peak wavelength
-            peak_wave = []
-            for it in range(len(sample_theta)):
-                peak_wave_val = self.peak_wavelength(sample_theta[it])
-                peak_wave.append(peak_wave_val)
-            sample_full = np.hstack((sample_full, np.zeros((n, 1))))
-            sample_full_vary = np.hstack((sample_full_vary, np.zeros((n, 1))))
-            sample_full[:, -1] = peak_wave
-            sample_full_vary[:, -1] = peak_wave
+            sample_full, sample_full_vary = np.hstack((sample_full, np.zeros((n, 1)))), np.hstack((sample_full_vary, np.zeros((n, 1))))
+            sample_full[:, -1], sample_full_vary[:, -1] = log_mu_lfir, log_mu_lfir
+            self.params_full.append("log_mu_LFIR")
+            self.params_full_vary.append("log_mu_LFIR")
+            
+            # Append peak wavelength
+            sample_full, sample_full_vary = np.hstack((sample_full, np.zeros((n, 1)))), np.hstack((sample_full_vary, np.zeros((n, 1))))
+            sample_full[:, -1], sample_full_vary[:, -1] = peak_wave, peak_wave
             self.params_full.append("peak_wave")
             self.params_full_vary.append("peak_wave")
 
@@ -300,7 +337,7 @@ class Source:
         self.sample_theta = sample_theta
         self.sample_full = sample_full
 
-        # Define the sampler for theta and all parameters, providing they are variable
+        # Define the sampler for theta and all parameters for variables
         self.sample_theta_vary = sample_theta_vary
         self.sample_full_vary = sample_full_vary
 
@@ -308,13 +345,18 @@ class Source:
 
     # Function returns the best fitting parameters
     def get_parameters(self, low_percentile=16, best_percentile=50, high_percentile=84):
-
+        """
+        Return the best fitting parameters
+        
+        :param low_percentile: The posterior percentile for lower error (Default = 16)
+        :param best_percentile: The posterior percentile for best parameter estimate (Default = 50)
+        :param high_percentile: The posterior percentile for higher error (Default = 84)
+        :return: Best fitting parameters with errors and a list of best fitting parameters
+        """
         # For each variable parameter calculate the median and the lower and upper percentiles
-        best_params = {}
-        best_theta = []
+        best_params, best_theta = {}, []
         sample_theta, sample_total = self.get_full_sampler()
-        ndims_full = len(self.params_full)
-        ndims = len(self.params)
+        ndims_full, ndims = len(self.params_full), len(self.params)
         for i in range(ndims_full):
             mcmc_param = np.percentile(sample_total[:, i], [low_percentile, best_percentile, high_percentile])
             mcmc_param_errors = np.diff(mcmc_param)
@@ -322,7 +364,8 @@ class Source:
             best_params[self.params_full[i]] = (error_low, median, error_high)
             if i < ndims:
                 best_theta.append(median)
-
+        
+        # Make best parameters and best theta accessible
         self.best_params = best_params
         self.best_theta = best_theta
 
@@ -330,26 +373,44 @@ class Source:
 
     # Function returns n samples of the posterior
     def sample_walkers(self, n):
-
+        """
+        Select random walkers to show error ranges in parameters
+        
+        :param n: Number of iterations
+        :return: Sampling of MCMC iterations
+        """
         # Select random draws from the sampler
         sample_theta_idx = np.random.choice(len(self.sample_theta), n)
-        n_sample_theta = [self.sample_theta[i] for i in sample_theta_idx]
-
         sample_total_idx = np.random.choice(len(self.sample_full), n)
+        n_sample_theta = [self.sample_theta[i] for i in sample_theta_idx]
         n_sample_full = [self.sample_full[i] for i in sample_total_idx]
 
         return n_sample_theta, n_sample_full
 
     # Returns the residuals for a given model
     def residuals(self, theta=None):
+        """
+        Calculates the residuals for a given model
+        
+        :param theta: Set of SED parameters (Default = best fitting)
+        :return: List of residuals
+        """
+        # If no theta provided, retrieve the best fitting
         if theta is None:
             theta = self.best_theta
         y_model = self.sed(self.frequencies_rest, theta)
-        residual = (self.flux_jy-y_model)/self.flux_jy
+        residual = (self.flux_jy-y_model)/self.fluxerr_jy
         return residual
 
     # Returns the chi-squared statistic for a given model
     def chi_squared(self, theta=None):
+        """
+        Calculates the chi squared for a given model
+        
+        :param theta: Set of SED parameters (Default = best fitting)
+        :return: Chi squared value
+        """
+        # If no theta provided, retrieve the best fitting
         if theta is None:
             theta = self.best_theta
         y_model = self.sed(self.frequencies_rest, theta)
@@ -358,6 +419,12 @@ class Source:
 
     # Returns the reduced chi-squared statistic for a given model
     def reduced_chi_squared(self, theta=None):
+        """
+        Calculates the reduced chi squared for a given model
+        
+        :param theta: Set of SED parameters (Default = best fitting)
+        :return: Reduced chi squared value
+        """
         if theta is None:
             theta = self.best_theta
         chi_squared = self.chi_squared(theta)
@@ -366,6 +433,11 @@ class Source:
 
     # Returns the corner plot of posterior distributions for the variable parameters
     def corner_plot(self):
+        """
+        Generates a corner plot of fitting parameters
+        
+        :return: Corner plot
+        """
         if self.verbose:
             fig = corner.corner(self.sample_full_vary, labels=self.params_full_vary, bins=30, plot_contour=True, color='b')
         else:
@@ -373,7 +445,12 @@ class Source:
 
     # Returns the nth sigma confidence ellipse between beta and dust temperature
     def beta_temperature_contours(self, n_std=3):
-
+        """
+        Generates error contours between dust emissivity spectral index and dust temperature
+        
+        :param n_std: Number of standard deviations of contour (Default = 3)
+        :return: Ellipse object
+        """
         # Sample the posterior distributions of beta and dust temperature
         t_idx = self.params_full_vary.index("t")
         beta_idx = self.params_full_vary.index("beta")
@@ -393,7 +470,12 @@ class Source:
 
     # Returns the nth sigma confidence ellipse between beta and peak wavelength
     def beta_peak_wavelength_contours(self, n_std=3):
-
+        """
+        Generates error contours between dust emissivity spectral index and peak wavelength
+        
+        :param n_std: Number of standard deviations of contour (Default = 3)
+        :return: Ellipse object
+        """
         # Sample the posterior distributions of beta and peak_wavelength
         peak_wave_idx = self.params_full_vary.index("peak_wave")
         beta_idx = self.params_full_vary.index("beta")
@@ -413,10 +495,18 @@ class Source:
 
     # Returns a summary of the most important values
     def results_summary(self):
+        """
+        Returns a summary of best fitting parameters
+        
+        :return: Dictionary of fitting parameters and their errors
+        """
+        # Retrieve the best fitting parameters common to all models
         best_params, best_theta = self.get_parameters()
         t_low, t, t_high = best_params['t']
         log_m_low, log_m, log_m_high = best_params['log_m']
         beta_low, beta, beta_high = best_params['beta']
+
+        # Generate dictionary of parameters for optically thin model
         if self.opacity_model == 'thin':
             summary = {'id': self.name,
                        'z': self.redshift,
@@ -426,6 +516,7 @@ class Source:
                        'chi': self.chi_squared(),
                        'chi_red': self.reduced_chi_squared()}
 
+        # Generate dictionary of parameters for general opacity models
         elif self.opacity_model == 'fixed_wave' or self.opacity_model == 'continuum_area':
             lambda_thick_low, lambda_thick, lambda_thick_high = best_params['lambda_thick']
             r_low, r, r_high = best_params['r']
@@ -439,7 +530,9 @@ class Source:
                        'chi': self.chi_squared(),
                        'chi_red': self.reduced_chi_squared()}
 
+        # If verbose, add derived parameters to dictionary
         if self.verbose:
+            # Retrieve derived parameters
             log_mu_lir_low, log_mu_lir, log_mu_lir_high = best_params['log_mu_LIR']
             log_mu_lfir_low, log_mu_lfir, log_mu_lfir_high = best_params['log_mu_LFIR']
             log_lir_low, log_lir, log_lir_high = best_params['log_LIR']
@@ -447,26 +540,32 @@ class Source:
             log_mu_m_low, log_mu_m, log_mu_m_high = best_params['log_mu_m']
             peak_wave_low, peak_wave, peak_wave_high = best_params['peak_wave']
 
+            # Add log(mu LIR) to dictionary
             summary.setdefault("logmulir_low", log_mu_lir_low)
             summary.setdefault("logmulir", log_mu_lir)
             summary.setdefault("logmulir_high", log_mu_lir_high)
 
+            # Add log(mu LFIR) to dictionary
             summary.setdefault("logmulfir_low", log_mu_lfir_low)
             summary.setdefault("logmulfir", log_mu_lfir)
             summary.setdefault("logmulfir_high", log_mu_lfir_high)
 
+            # Add log(LIR) to dictionary
             summary.setdefault("loglir_low", log_lir_low)
             summary.setdefault("loglir", log_lir)
             summary.setdefault("loglir_high", log_lir_high)
 
+            # Add log(LFIR) to dictionary
             summary.setdefault("loglfir_low", log_lfir_low)
             summary.setdefault("loglfir", log_lfir)
             summary.setdefault("loglfir_high", log_lfir_high)
 
+            # Add log(mu M) to dictionary
             summary.setdefault("logmum_low", log_mu_m_low)
             summary.setdefault("logmum", log_mu_m)
             summary.setdefault("logmum_high", log_mu_m_high)
 
+            # Add peak wavelength to dictionary
             summary.setdefault("peakwave_low", peak_wave_low)
             summary.setdefault("peakwave", peak_wave)
             summary.setdefault("peakwave_high", peak_wave_high)
