@@ -142,7 +142,7 @@ def simulation_setup(n, parameters, disable=False):
         else:
             raise ValueError("Please provide a range of mid-IR slopes 'range_alpha' or a fixed mid-IR slope 'fixed_alpha' in parameters." )
 
-        
+        # Obtain dust mass from range of LIR, fixed LIR, range of dust masses or fixed dust mass
         if 'range_logmulir' in parameters:
             if 'lir_limits' in parameters:
                 lir_low, lir_high = parameters['lir_limits'][0], parameters['lir_limits'][1]
@@ -191,6 +191,7 @@ def simulation_setup(n, parameters, disable=False):
         else:
             raise ValueError("Please provide a range of IR luminosities 'range_logmulir'/'range_loglir', a fixed IR luminosity 'fixed_logmulir'/'fixed_loglir', a range of dust masses 'range_logm' or a fixed dust mass 'fixed_logm' in parameters. (NOTE: a fixed IR luminosity only fixes the dust mass to its initial value, the final IR luminosity will change)." )
 
+        # Add the input parameters to list
         param_names.append('logm')
         param_values.append(logm_input)
         param_names.append('t')
@@ -234,6 +235,8 @@ def simulation_setup(n, parameters, disable=False):
         loglfir_input = np.log10((10**logmulfir_input)/mock_gal.magnification)
         logmum_input = np.log10((10**logm_input)*mock_gal.magnification)
         peakwave_input = mock_gal.peak_wavelength(param_values)
+
+        # Append derived parameters to input lists
         param_names.append('logmulir')
         param_values.append(logmulir_input)
         param_names.append('logmulfir')
@@ -249,9 +252,58 @@ def simulation_setup(n, parameters, disable=False):
         param_names.append('detected')
         param_values.append(detected)
 
+        # Add input parameters to list for all simulated galaxies
         param_inputs_all.append(param_values)
         fixed_param_inputs_all.append(fixed_values)
 
+    # Create dataframes from the fixed and variable input parameters for all simulated galaxies
     inputs = pd.DataFrame(param_inputs_all, columns=param_names)
     fixed_inputs = pd.DataFrame(fixed_param_inputs_all, columns=fixed_names)
     return inputs, fixed_inputs, galaxies_all
+
+# --------------------------------------------------
+
+def simulation(n, parameters, name, nwalkers=25, niters=2000, sigma=1e-4, burn_in=500, disable=False):
+    """
+    Runs SED fitting simulation for a set of mock galaxies
+    
+    :param n: Number of simulated galaxies
+    :param parameters: Parameter file for simulations
+    :param name: Name of simulation when saved
+    :param nwalkers: Number of walkers in MC (Default = 25)
+    :param niters: Number of MC iterations (Default = 2000)
+    :param sigma: Exploration parameter of MC (Default = 1e-4)
+    :param burn_in: Number of initial steps in MC that are ignored (Default = 500)
+    :param disable: Show progress of simulation (Default = FALSE)
+    :return: Inputs, outputs and mock galaxies
+    """
+    # Set up lists for output parameters and output galaxies
+    outputs, galaxies_output = [], []
+    inputs, fixed_inputs, galaxies_input = simulation_setup(n, parameters)
+
+    # Run simulation for each galaxy created
+    for gal in tqdm(range(len(galaxies_input)), desc='Simulation', disable=disable):
+        # Create galaxy, fit SED and gather results
+        galaxy = galaxies_input[gal]
+        galaxy('thin', fixparams=fixed_inputs.columns.tolist(), fixvalues=fixed_inputs.iloc[gal].tolist(), cmb=parameters['cmb'], powerlaw=True, nwalkers=nwalkers, niters=niters, sigma=sigma, burn_in=burn_in, progress=False, verbose=False)
+        galaxy_output = galaxy.results_summary()
+
+        # Gather derived quantities
+        galaxy_output['logmulir'] = galaxy.ir_luminosity(galaxy.best_theta, lam_low_um_rest=8, lam_high_um_rest=1000).value
+        galaxy_output['logmulfir'] = galaxy.ir_luminosity(galaxy.best_theta, lam_low_um_rest=40, lam_high_um_rest=1000).value
+        galaxy_output['loglir'] = np.log10((10**galaxy_output['logmulir'])/galaxy.magnification)
+        galaxy_output['loglfir'] = np.log10((10**galaxy_output['logmulfir'])/galaxy.magnification)
+        galaxy_output['logmum'] = np.log10((10**galaxy_output['logm'])*galaxy.magnification)
+        galaxy_output['peakwave'] = galaxy.peak_wavelength(galaxy.best_theta)
+
+        # Append outputs to lists
+        galaxies_output.append(galaxy)
+        outputs.append(galaxy_output)
+    outputs = pd.DataFrame(outputs)
+
+    # Save simulations results
+    utils.save_catalogue(inputs, 'simulation_results', name+'_inputs')
+    utils.save_catalogue(outputs, 'simulation_results', name+'_outputs')
+    utils.save_catalogue(galaxies_output, 'simulation_results', name+'_mock_galaxies')
+
+    return inputs, outputs, galaxies_output
