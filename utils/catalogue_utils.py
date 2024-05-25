@@ -17,7 +17,7 @@ def create_catalogue(data):
     Creates a catalogue of sources from a data file
     
     :param data: Data file
-    :return: Ctalogue of sources
+    :return: Catalogue of sources
     """
     catalogue = []
 

@@ -263,7 +263,7 @@ def simulation_setup(n, parameters, disable=False):
 
 # --------------------------------------------------
 
-def simulation(n, parameters, name, nwalkers=25, niters=2000, sigma=1e-4, burn_in=500, disable=False):
+def mock_galaxy(n, parameters, name, nwalkers=25, niters=2000, sigma=1e-4, burn_in=500, disable=False):
     """
     Runs SED fitting simulation for a set of mock galaxies
     
