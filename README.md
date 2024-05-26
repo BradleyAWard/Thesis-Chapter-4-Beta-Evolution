@@ -1,1 +1,11 @@
-This is the README
+## Dust Properties of DSFGs
+
+In Chapter 4, we studied the dust properties of a sample of ∼100 galaxies between z = 2 and z = 6. We are particularly interested in their measured values of the dust emissivity index, β, an observational indicator of the physical and chemical properties ofthe dust grains.
+
+- We modelled the IR to mm spectra of these galaxies using three variants of an isothermal modified blackbody model. One assuming optically thin dust, one assuming a general opacity law where the transition between optically thin and optically thick dust occurs at 100 µm, and the other at 200 µm. We found that the general opacity models systematically measure lower dust masses and higher dust temperatures than the optically thin model. The dust emissivity index and IR luminosities, however, are insensitive to the chosen model.
+
+- We observed a strong relationship between the dust emissivity index and the dust temperature of galaxies, a reflection of the well-known β-dust temperature degeneracy. We test whether this relationship is an intrinsic property of galaxies or an artefact of the fitting process by running simulations of mock galaxies and attempting to recover the anti-correlation. The correlation between the two parameters for mock galaxies was not strong enough to account for the relationship observed for real galaxies, suggesting that there is a genuine inverse correlation.
+
+- The average dust emissivity spectral index was β = 1.96 (1.98 and 1.91 for SPT and HerBS galaxies, respectively). This value is significantly higher than the value in the Galaxy which is uniformly around 1.51, and higher than nearby galaxies (Lamperti et al., 2019), suggesting that studies of extragalactic sources at high redshift should favour β ∼ 2 rather than assuming a local value. Within the population studied here, no redshift evolution is observed between z = 2 and z = 6.
+
+- Given the strong relationship between IR luminosity and dust temperature, we selected a sub-sample of galaxies at similar luminosities and found that there appears little evolution in their dust temperatures with redshift.
